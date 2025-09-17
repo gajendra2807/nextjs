@@ -832,37 +832,119 @@ function Modal({ children, isOpen }) {
 }
 ```
 
-### 10.4 Server Actions (Next.js 14+)
+### 10.4 Server Actions & Data Mutations
 
-Server Actions allow defining server-side functionality directly in your components.
+Server Actions are a powerful Next.js feature that allows you to run secure server-side code directly from your client components. They simplify data mutations (creating, updating, deleting) by eliminating the need to manually create API endpoints.
 
-#### Example:
-```tsx
+#### Key Benefits:
+- **Simplified Logic**: No need to create separate API routes for data mutations.
+- **Reduced Client-Side JavaScript**: The logic runs on the server, not in the browser.
+- **Enhanced Security**: Code is executed in a secure server environment, protecting against client-side attacks.
+- **Progressive Enhancement**: Forms work even if JavaScript is disabled.
+
+#### How to Define a Server Action
+
+A Server Action is an `async` function defined with the `'use server'` directive at the top of the function body or the top of the file.
+
+```typescript
+// Can be in a component file or a separate file (e.g., app/actions.ts)
 'use server';
 
-async function saveFormData(formData: FormData) {
-  const name = formData.get('name');
-  const email = formData.get('email');
-  
-  // Server-side logic (e.g., database operations)
-  await db.users.create({ name, email });
-  
-  return { success: true };
+export async function myAction(formData: FormData) {
+  // ... server-side logic
+}
+```
+
+#### Refactoring Our To-Do App with Server Actions
+
+Let's see how we could refactor our `handleAddTodo` function. Currently, it's a client-side function. We can move this logic to the server.
+
+**Step 1: Create an `actions.ts` file.**
+
+It's best practice to co-locate Server Actions in a dedicated file.
+
+```typescript
+// src/app/actions.ts
+'use server';
+
+import { revalidatePath } from 'next/cache';
+
+// In a real app, you would import your database client here.
+// For this example, we'll simulate a database.
+const todos: Todo[] = []; 
+
+interface Todo {
+  id: number;
+  text: string;
+  completed: boolean;
 }
 
-// Client component usage
+export async function addTodo(formData: FormData) {
+  const text = formData.get('text') as string;
+
+  if (!text || text.trim() === '') {
+    return; // Or return an error message
+  }
+
+  // --- Server-Side Logic ---
+  // In a real app, you would write to your database here.
+  const newTodo = {
+    id: Date.now(),
+    text: text,
+    completed: false,
+  };
+  todos.push(newTodo);
+  console.log('New todo added on the server:', newTodo);
+  // ------------------------
+
+  // Revalidate the cache for the home page to show the new todo.
+  revalidatePath('/');
+}
+```
+
+**Step 2: Update the `TodoList.tsx` component to use the Server Action.**
+
+The client component becomes much simpler. It no longer manages the state itself; it just calls the server action.
+
+```tsx
+// src/components/TodoList.tsx (Simplified Example)
 'use client';
 
-function ContactForm() {
+import { addTodo } from '@/app/actions';
+import { useTransition } from 'react';
+
+export default function TodoList({ serverTodos }) {
+  let [isPending, startTransition] = useTransition();
+
   return (
-    <form action={saveFormData}>
-      <input name="name" />
-      <input name="email" type="email" />
-      <button type="submit">Submit</button>
-    </form>
+    <div>
+      {/* The form now calls the server action directly */}
+      <form action={(formData) => {
+        startTransition(() => addTodo(formData));
+      }}>
+        <input type="text" name="text" placeholder="Add a new task..." />
+        <button type="submit" disabled={isPending}>
+          {isPending ? 'Adding...' : 'Add Task'}
+        </button>
+      </form>
+
+      {/* The list of todos would be passed down as a prop from a Server Component */}
+      <ul>
+        {serverTodos.map(todo => (
+          <li key={todo.id}>{todo.text}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 ```
+
+#### Key Concepts in the Example:
+
+- **`'use server'`**: Marks `addTodo` as a Server Action.
+- **`revalidatePath('/')`**: This is crucial. After the data changes on the server, this function tells Next.js to clear the cache for the homepage (`/`) and re-fetch the data. This is how the UI updates with the new information.
+- **`useTransition`**: A React hook used to manage pending states. When the form is submitted, `isPending` becomes `true`, allowing us to show a loading state on the button. This provides a better user experience by preventing double-clicks and showing feedback.
+- **Data Flow**: The `TodoList` component is now simpler. It doesn't hold the `todos` state itself. Instead, a parent Server Component would fetch the todos and pass them down as props (`serverTodos`).
 
 ---
 
